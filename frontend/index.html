@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quality Docs Platform</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="card">
+        <h1>Quality Docs Platform</h1>
+        <p class="muted">Небольшой фронтенд для API (FastAPI). Хостится на GitHub Pages, работает с API по указанному базовому URL.</p>
+        <div class="field">
+          <label for="apiBase">API base URL</label>
+          <input id="apiBase" type="text" value="http://localhost:8000" />
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Аутентификация</h2>
+        <div class="field">
+          <label for="username">Имя пользователя</label>
+          <input id="username" type="text" placeholder="admin" />
+        </div>
+        <div class="field">
+          <label for="password">Пароль</label>
+          <input id="password" type="password" placeholder="admin123" />
+        </div>
+        <button id="loginBtn">Войти</button>
+        <div class="field inline">
+          <button id="logoutBtn" class="ghost">Выйти</button>
+          <span id="currentUser" class="muted"></span>
+        </div>
+        <p id="authStatus" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Загрузка документа (admin)</h2>
+        <div class="field">
+          <label for="title">Название</label>
+          <input id="title" type="text" />
+        </div>
+        <div class="field">
+          <label for="description">Описание</label>
+          <textarea id="description" rows="2"></textarea>
+        </div>
+        <div class="field">
+          <label for="tags">Теги</label>
+          <input id="tags" type="text" placeholder="policy,root" />
+        </div>
+        <div class="field">
+          <label for="file">Файл</label>
+          <input id="file" type="file" />
+        </div>
+        <button id="uploadBtn">Загрузить</button>
+        <p class="muted">Создаёт новую версию, если документ с таким названием уже существует.</p>
+        <p id="uploadStatus" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Документы</h2>
+        <div class="field inline">
+          <input id="search" type="text" placeholder="Поиск по названию/описанию" />
+          <input id="tagFilter" type="text" placeholder="Тег" />
+          <button id="refreshBtn">Обновить</button>
+        </div>
+        <div id="docs" class="list"></div>
+      </section>
+    </main>
+
+    <template id="docTemplate">
+      <div class="doc-item">
+        <div>
+          <div class="doc-title"></div>
+          <div class="doc-meta"></div>
+        </div>
+        <div class="actions">
+          <button class="download">Скачать</button>
+          <button class="versions ghost">Версии</button>
+        </div>
+      </div>
+    </template>
+
+    <template id="versionTemplate">
+      <div class="version-item">
+        <span class="version-label"></span>
+        <button class="download">Скачать</button>
+      </div>
+    </template>
+
+    <script>
+      const apiBaseInput = document.querySelector('#apiBase');
+      const usernameInput = document.querySelector('#username');
+      const passwordInput = document.querySelector('#password');
+      const loginBtn = document.querySelector('#loginBtn');
+      const logoutBtn = document.querySelector('#logoutBtn');
+      const authStatus = document.querySelector('#authStatus');
+      const currentUser = document.querySelector('#currentUser');
+      const titleInput = document.querySelector('#title');
+      const descriptionInput = document.querySelector('#description');
+      const tagsInput = document.querySelector('#tags');
+      const fileInput = document.querySelector('#file');
+      const uploadBtn = document.querySelector('#uploadBtn');
+      const uploadStatus = document.querySelector('#uploadStatus');
+      const docsContainer = document.querySelector('#docs');
+      const searchInput = document.querySelector('#search');
+      const tagFilterInput = document.querySelector('#tagFilter');
+      const refreshBtn = document.querySelector('#refreshBtn');
+
+      let token = localStorage.getItem('token') || '';
+      let apiBase = localStorage.getItem('apiBase') || apiBaseInput.value;
+      apiBaseInput.value = apiBase;
+
+      const setStatus = (element, message, isError = false) => {
+        element.textContent = message || '';
+        element.classList.toggle('error', isError);
+      };
+
+      const setUser = (user) => {
+        currentUser.textContent = user ? `Вошли как ${user.username} (${user.role})` : '';
+      };
+
+      const authHeaders = () => (token ? { Authorization: `Bearer ${token}` } : {});
+
+      const normalizeApiBase = () => {
+        let value = apiBaseInput.value.trim();
+        if (!value) {
+          value = window.location.origin;
+        }
+        value = value.replace(/\/$/, '');
+        if (window.location.protocol === 'https:' && value.startsWith('http://')) {
+          throw new Error('API должно быть доступно по https, чтобы избежать блокировок Mixed Content');
+        }
+        apiBase = value;
+        localStorage.setItem('apiBase', apiBase);
+        return apiBase;
+      };
+
+      apiBaseInput.addEventListener('change', () => {
+        try {
+          normalizeApiBase();
+          setStatus(authStatus, 'Базовый URL сохранён');
+        } catch (e) {
+          setStatus(authStatus, e.message, true);
+        }
+      });
+
+      const handleResponse = async (response) => {
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `HTTP ${response.status}`);
+        }
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          return response.json();
+        }
+        return response.blob();
+      };
+
+      const login = async () => {
+        setStatus(authStatus, 'Входим...');
+        try {
+          normalizeApiBase();
+          const result = await fetch(`${apiBase}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: usernameInput.value, password: passwordInput.value }),
+          }).then(handleResponse);
+          token = result.access_token;
+          localStorage.setItem('token', token);
+          setStatus(authStatus, 'Успешный вход');
+          await fetchMe();
+        } catch (e) {
+          setStatus(authStatus, e.message, true);
+        }
+      };
+
+      const fetchMe = async () => {
+        if (!token) {
+          setUser(null);
+          return;
+        }
+        try {
+          normalizeApiBase();
+          const user = await fetch(`${apiBase}/users/me`, { headers: authHeaders() }).then(handleResponse);
+          setUser(user);
+        } catch (e) {
+          setStatus(authStatus, 'Токен недействителен, выйдите и войдите снова', true);
+          setUser(null);
+        }
+      };
+
+      const logout = () => {
+        token = '';
+        localStorage.removeItem('token');
+        setUser(null);
+        setStatus(authStatus, 'Вышли из системы');
+      };
+
+      const upload = async () => {
+        try {
+          normalizeApiBase();
+        } catch (e) {
+          setStatus(uploadStatus, e.message, true);
+          return;
+        }
+
+        if (!token) {
+          setStatus(uploadStatus, 'Нужен вход', true);
+          return;
+        }
+        if (!fileInput.files.length) {
+          setStatus(uploadStatus, 'Выберите файл', true);
+          return;
+        }
+        const formData = new FormData();
+        formData.append('title', titleInput.value);
+        formData.append('description', descriptionInput.value);
+        formData.append('tags', tagsInput.value);
+        formData.append('file', fileInput.files[0]);
+        setStatus(uploadStatus, 'Загружаем...');
+        try {
+          await fetch(`${apiBase}/documents`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: formData,
+          }).then(handleResponse);
+          setStatus(uploadStatus, 'Готово');
+          await loadDocuments();
+        } catch (e) {
+          setStatus(uploadStatus, e.message, true);
+        }
+      };
+
+      const download = async (docId, version = null, originalName = 'download') => {
+        try {
+          normalizeApiBase();
+        } catch (e) {
+          alert(e.message);
+          return;
+        }
+
+        const url = new URL(`${apiBase}/documents/${docId}/download`);
+        if (version) url.searchParams.set('version', version);
+        try {
+          const blob = await fetch(url, { headers: authHeaders() }).then(handleResponse);
+          const href = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = href;
+          a.download = originalName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(href);
+        } catch (e) {
+          alert(e.message);
+        }
+      };
+
+      const loadVersions = async (docId, container, title) => {
+        container.innerHTML = '';
+        try {
+          normalizeApiBase();
+          const versions = await fetch(`${apiBase}/documents/${docId}/versions`, { headers: authHeaders() }).then(
+            handleResponse,
+          );
+          if (!versions.length) {
+            container.textContent = 'Версий нет';
+            return;
+          }
+          const tpl = document.querySelector('#versionTemplate');
+          versions.forEach((v) => {
+            const node = tpl.content.cloneNode(true);
+            node.querySelector('.version-label').textContent = `v${v.version} • ${v.original_name}`;
+            node.querySelector('.download').addEventListener('click', () => download(docId, v.version, v.original_name));
+            container.appendChild(node);
+          });
+        } catch (e) {
+          container.textContent = e.message;
+        }
+      };
+
+      const loadDocuments = async () => {
+        try {
+          normalizeApiBase();
+        } catch (e) {
+          docsContainer.textContent = e.message;
+          return;
+        }
+
+        docsContainer.innerHTML = 'Загружаем...';
+        const params = new URLSearchParams();
+        if (searchInput.value) params.set('q', searchInput.value);
+        if (tagFilterInput.value) params.set('tag', tagFilterInput.value);
+        try {
+          const documents = await fetch(`${apiBase}/documents?${params.toString()}`, { headers: authHeaders() }).then(
+            handleResponse,
+          );
+          const tpl = document.querySelector('#docTemplate');
+          docsContainer.innerHTML = '';
+          if (!documents.length) {
+            docsContainer.textContent = 'Документов нет';
+            return;
+          }
+          documents.forEach((doc) => {
+            const node = tpl.content.cloneNode(true);
+            node.querySelector('.doc-title').textContent = doc.title;
+            node.querySelector('.doc-meta').textContent = `${doc.description || 'Без описания'} • v${doc.latest_version}`;
+            node.querySelector('.download').addEventListener('click', () => download(doc.id, null, doc.title));
+            const versionsBtn = node.querySelector('.versions');
+            const versionsContainer = document.createElement('div');
+            versionsContainer.className = 'versions-list';
+            versionsBtn.addEventListener('click', () => loadVersions(doc.id, versionsContainer, doc.title));
+            node.querySelector('.doc-item').appendChild(versionsContainer);
+            docsContainer.appendChild(node);
+          });
+        } catch (e) {
+          docsContainer.textContent = e.message;
+        }
+      };
+
+      loginBtn.addEventListener('click', login);
+      logoutBtn.addEventListener('click', logout);
+      uploadBtn.addEventListener('click', upload);
+      refreshBtn.addEventListener('click', loadDocuments);
+
+      fetchMe();
+      loadDocuments();
+    </script>
+  </body>
+</html>
