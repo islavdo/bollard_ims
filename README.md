@@ -13,6 +13,12 @@ uvicorn app.main:app --reload
 
 API доступно на `http://localhost:8000` (Swagger UI: `/docs`). При первом запуске автоматически создаётся админ `admin/admin123`.
 
+### GitHub Pages (статический фронтенд)
+- В каталоге `frontend/` лежит лёгкий статический UI для работы с API (логин, загрузка документов, поиск, скачивание).
+- Workflow `.github/workflows/pages.yml` публикует `frontend/` в GitHub Pages (environment `github-pages`).
+- После первого деплоя включите Pages в настройках репозитория, выбрав GitHub Actions как источник.
+- В UI задайте `API base URL` (например, публичный адрес развёрнутого FastAPI) и залогиньтесь.
+
 ## Основные возможности
 - Регистрация/логин, роли admin/user.
 - Админ может загружать документы и создавать версии.
