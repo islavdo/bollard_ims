@@ -123,28 +123,12 @@
 
       const authHeaders = () => (token ? { Authorization: `Bearer ${token}` } : {});
 
-      const normalizeApiBase = () => {
-        let value = apiBaseInput.value.trim();
-        if (!value) {
-          value = window.location.origin;
-        }
-        value = value.replace(/\/$/, '');
-        if (window.location.protocol === 'https:' && value.startsWith('http://')) {
-          throw new Error('API должно быть доступно по https, чтобы избежать блокировок Mixed Content');
-        }
-        apiBase = value;
+      const saveApiBase = () => {
+        apiBase = apiBaseInput.value.trim() || 'http://localhost:8000';
         localStorage.setItem('apiBase', apiBase);
-        return apiBase;
       };
 
-      apiBaseInput.addEventListener('change', () => {
-        try {
-          normalizeApiBase();
-          setStatus(authStatus, 'Базовый URL сохранён');
-        } catch (e) {
-          setStatus(authStatus, e.message, true);
-        }
-      });
+      apiBaseInput.addEventListener('change', saveApiBase);
 
       const handleResponse = async (response) => {
         if (!response.ok) {
@@ -159,9 +143,9 @@
       };
 
       const login = async () => {
+        saveApiBase();
         setStatus(authStatus, 'Входим...');
         try {
-          normalizeApiBase();
           const result = await fetch(`${apiBase}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -182,7 +166,6 @@
           return;
         }
         try {
-          normalizeApiBase();
           const user = await fetch(`${apiBase}/users/me`, { headers: authHeaders() }).then(handleResponse);
           setUser(user);
         } catch (e) {
@@ -199,13 +182,6 @@
       };
 
       const upload = async () => {
-        try {
-          normalizeApiBase();
-        } catch (e) {
-          setStatus(uploadStatus, e.message, true);
-          return;
-        }
-
         if (!token) {
           setStatus(uploadStatus, 'Нужен вход', true);
           return;
@@ -234,13 +210,6 @@
       };
 
       const download = async (docId, version = null, originalName = 'download') => {
-        try {
-          normalizeApiBase();
-        } catch (e) {
-          alert(e.message);
-          return;
-        }
-
         const url = new URL(`${apiBase}/documents/${docId}/download`);
         if (version) url.searchParams.set('version', version);
         try {
@@ -261,7 +230,6 @@
       const loadVersions = async (docId, container, title) => {
         container.innerHTML = '';
         try {
-          normalizeApiBase();
           const versions = await fetch(`${apiBase}/documents/${docId}/versions`, { headers: authHeaders() }).then(
             handleResponse,
           );
@@ -282,13 +250,7 @@
       };
 
       const loadDocuments = async () => {
-        try {
-          normalizeApiBase();
-        } catch (e) {
-          docsContainer.textContent = e.message;
-          return;
-        }
-
+        saveApiBase();
         docsContainer.innerHTML = 'Загружаем...';
         const params = new URLSearchParams();
         if (searchInput.value) params.set('q', searchInput.value);
